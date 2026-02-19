@@ -1,87 +1,98 @@
-// Mercury Bridge Server
-// Run with: node server.js
-// Requires Node.js - install with: npm install express cors
-
 const express = require("express");
 const cors    = require("cors");
 const app     = express();
-const PORT    = 7331;
+const PORT    = process.env.PORT || 7331;
 
 app.use(cors());
 app.use(express.json());
 
-// Stores pending scripts per player
-let pendingScripts = {}; // { [userId]: [scriptString, ...] }
-let connectedPlayers = {}; // { [userId]: lastSeen }
+// { userId: [scripts...] }
+let pending = {};
+// { userId: timestamp }
+let players = {};
 
-// ── Mercury C# posts here to send a script ───────────────────────────
-// POST /execute  body: { script: "...", userId: "all" or "12345678" }
+// ── POST /execute  ← from Mercury C# ────────────────────────────────
 app.post("/execute", (req, res) => {
     const { script, userId } = req.body;
+    if (!script) return res.status(400).json({ error: "No script" });
 
-    if (!script) {
-        return res.status(400).json({ error: "No script provided" });
-    }
-
-    const target = userId || "all";
+    const target = (userId || "all").trim();
 
     if (target === "all") {
-        // Send to every connected player
-        for (const uid in connectedPlayers) {
-            if (!pendingScripts[uid]) pendingScripts[uid] = [];
-            pendingScripts[uid].push(script);
+        // Queue for every known player
+        const known = Object.keys(players);
+        if (known.length === 0) {
+            // No players connected yet — store under "all" as fallback
+            if (!pending["all"]) pending["all"] = [];
+            pending["all"].push(script);
+            console.log("[Execute] No players online yet, queued under 'all'");
+        } else {
+            known.forEach(uid => {
+                if (!pending[uid]) pending[uid] = [];
+                pending[uid].push(script);
+            });
+            console.log("[Execute] Queued for " + known.length + " player(s): " + known.join(", "));
         }
-        console.log("[Execute] Script queued for ALL players (" + Object.keys(connectedPlayers).length + " online)");
     } else {
-        if (!pendingScripts[target]) pendingScripts[target] = [];
-        pendingScripts[target].push(script);
-        console.log("[Execute] Script queued for player " + target);
+        if (!pending[target]) pending[target] = [];
+        pending[target].push(script);
+        console.log("[Execute] Queued for userId: " + target);
     }
 
-    res.json({ success: true, target: target });
+    res.json({ success: true, target: target, online: Object.keys(players) });
 });
 
-// ── Roblox polls here to get pending scripts ─────────────────────────
-// GET /poll?userId=12345678
+// ── GET /poll?userId=XXXX  ← from Roblox ────────────────────────────
 app.get("/poll", (req, res) => {
-    const userId = req.query.userId;
+    const userId = (req.query.userId || "").trim();
+    if (!userId) return res.status(400).json({ error: "No userId" });
 
-    if (!userId) {
-        return res.status(400).json({ error: "No userId provided" });
+    // Register player as online
+    players[userId] = Date.now();
+
+    // Collect scripts: ones sent to this specific userId + ones sent to "all"
+    let scripts = [];
+
+    if (pending[userId] && pending[userId].length > 0) {
+        scripts = scripts.concat(pending[userId]);
+        pending[userId] = [];
     }
 
-    // Mark player as connected
-    connectedPlayers[userId] = Date.now();
+    if (pending["all"] && pending["all"].length > 0) {
+        scripts = scripts.concat(pending["all"]);
+        pending["all"] = [];
+    }
 
-    const scripts = pendingScripts[userId] || [];
-    pendingScripts[userId] = []; // clear after delivering
+    if (scripts.length > 0)
+        console.log("[Poll] Delivering " + scripts.length + " script(s) to userId: " + userId);
 
     res.json({ scripts: scripts });
 });
 
-// ── Get connected players (for Mercury UI) ───────────────────────────
-// GET /players
-app.get("/players", (req, res) => {
-    // Remove players not seen in last 15 seconds
+// ── GET /status  ← debug ─────────────────────────────────────────────
+app.get("/status", (req, res) => {
     const now = Date.now();
-    for (const uid in connectedPlayers) {
-        if (now - connectedPlayers[uid] > 15000) {
-            delete connectedPlayers[uid];
-            delete pendingScripts[uid];
+    // Remove stale players (no poll in 15s)
+    Object.keys(players).forEach(uid => {
+        if (now - players[uid] > 15000) {
+            delete players[uid];
         }
-    }
-    res.json({ players: Object.keys(connectedPlayers) });
+    });
+    res.json({
+        online_players: Object.keys(players),
+        pending_counts: Object.fromEntries(
+            Object.entries(pending).map(([k, v]) => [k, v.length])
+        )
+    });
 });
 
-// ── Health check ─────────────────────────────────────────────────────
+// ── GET /  ── health check ───────────────────────────────────────────
 app.get("/", (req, res) => {
     res.json({ status: "Mercury Bridge online", port: PORT });
 });
 
 app.listen(PORT, () => {
-    console.log("=================================");
-    console.log("  Mercury Bridge Server");
-    console.log("  Running on http://localhost:" + PORT);
-    console.log("=================================");
-    console.log("Waiting for Roblox connection...");
+    console.log("================================");
+    console.log("  Mercury Bridge  |  Port " + PORT);
+    console.log("================================");
 });
