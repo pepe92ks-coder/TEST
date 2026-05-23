@@ -1,109 +1,158 @@
-const express = require("express");
-const cors = require("cors");
-const app = express();
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phantom Custom Display</title>
+    <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.87.6/lib/index.iife.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0c12;
+            font-family: 'Segoe UI', system-ui;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .card {
+            background: #1a1f2e;
+            border-radius: 24px;
+            padding: 32px;
+            width: 400px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+        .balance {
+            font-size: 48px;
+            font-weight: bold;
+            color: #8247e5;
+            margin: 20px 0;
+        }
+        .token-list {
+            margin: 20px 0;
+            text-align: left;
+        }
+        .token {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            border-bottom: 1px solid #2a2f3e;
+        }
+        button {
+            background: linear-gradient(135deg, #8247e5, #6a1b9a);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 30px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+        }
+        .warning {
+            background: rgba(239, 68, 68, 0.1);
+            color: #f87171;
+            padding: 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        .connected {
+            background: #0f1119;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h2>✨ Phantom Custom Display</h2>
+    <p style="color: #8a92a3; margin: 10px 0;">Conecta tu wallet real • Datos demostrativos</p>
+    
+    <div class="connected" id="walletStatus">
+        ⚡ No conectado
+    </div>
+    
+    <div class="balance" id="displayBalance">
+        $0.00
+    </div>
+    
+    <div class="token-list" id="tokenList">
+        <div class="token"><span>🪙 SOL</span><span id="solBalance">0.00</span></div>
+        <div class="token"><span>💵 USDC</span><span id="usdcBalance">0.00</span></div>
+        <div class="token"><span>🐕 BONK</span><span id="bonkBalance">0</span></div>
+    </div>
+    
+    <button id="connectBtn">🔌 Conectar Phantom</button>
+    
+    <div class="warning">
+        ⚠️ Los balances mostrados son DEMOSTRATIVOS.<br>
+        No representan tus fondos reales en la blockchain.
+    </div>
+</div>
 
-const PORT = process.env.PORT || 7331;  // Railway asigna process.env.PORT automáticamente
-
-app.use(cors({ origin: "*" }));         // permite cualquier origen (útil para Roblox + tu PC)
-app.use(express.json());
-
-// Almacenamiento en memoria (se pierde al reiniciar el contenedor en Railway free)
-let pending = {};   // { userId: [script1, script2, ...] , "all": [...] }
-let players = {};   // { userId: lastSeenTimestamp }
-
-// ── POST /execute ── desde tu programa C#
-app.post("/execute", (req, res) => {
-    const { script, userId } = req.body;
-
-    if (!script || typeof script !== "string") {
-        return res.status(400).json({ error: "Missing or invalid 'script'" });
+<script>
+    // DATOS FALSOS - PUEDES EDITARLOS
+    const FAKE_DATA = {
+        sol: 12500.50,
+        usdc: 50000.00,
+        bonk: 125000000,
+        solPrice: 200  // Precio ficticio de SOL
+    };
+    
+    let provider = null;
+    let connected = false;
+    
+    function updateDisplay() {
+        const totalValue = (FAKE_DATA.sol * FAKE_DATA.solPrice) + FAKE_DATA.usdc;
+        document.getElementById('displayBalance').innerText = `$${totalValue.toLocaleString()}`;
+        document.getElementById('solBalance').innerText = `${FAKE_DATA.sol.toLocaleString()} SOL`;
+        document.getElementById('usdcBalance').innerText = `${FAKE_DATA.usdc.toLocaleString()} USDC`;
+        document.getElementById('bonkBalance').innerText = FAKE_DATA.bonk.toLocaleString();
     }
-
-    const target = (userId || "all").trim();
-
-    if (target === "all") {
-        const knownPlayers = Object.keys(players);
-        if (knownPlayers.length === 0) {
-            if (!pending["all"]) pending["all"] = [];
-            pending["all"].push(script);
-            console.log(`[EXECUTE] No players → queued for 'all': ${script.substring(0, 60)}...`);
+    
+    async function connectPhantom() {
+        if ('phantom' in window) {
+            provider = window.phantom?.solana;
+            
+            if (provider?.isPhantom) {
+                try {
+                    const response = await provider.connect();
+                    const publicKey = response.publicKey.toString();
+                    
+                    connected = true;
+                    document.getElementById('walletStatus').innerHTML = 
+                        `✅ Conectado: ${publicKey.substring(0, 6)}...${publicKey.substring(publicKey.length - 4)}`;
+                    document.getElementById('connectBtn').innerText = '✅ Wallet Conectada';
+                    document.getElementById('connectBtn').disabled = true;
+                    
+                    // Mostrar datos falsos
+                    updateDisplay();
+                    
+                    console.log('📍 Wallet real conectada:', publicKey);
+                    console.log('⚠️ Los balances mostrados son DEMOSTRATIVOS');
+                    
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('Error al conectar');
+                }
+            } else {
+                alert('Phantom no está instalado');
+                window.open('https://phantom.app/', '_blank');
+            }
         } else {
-            knownPlayers.forEach(uid => {
-                if (!pending[uid]) pending[uid] = [];
-                pending[uid].push(script);
-            });
-            console.log(`[EXECUTE] Queued for ${knownPlayers.length} players: ${script.substring(0, 60)}...`);
+            alert('Phantom no está instalado');
+            window.open('https://phantom.app/', '_blank');
         }
-    } else {
-        if (!pending[target]) pending[target] = [];
-        pending[target].push(script);
-        console.log(`[EXECUTE] Queued for ${target}: ${script.substring(0, 60)}...`);
     }
-
-    res.json({ success: true, target, queued: (pending[target]?.length || 0) });
-});
-
-// ── GET /poll?userId=XXXX ── desde Roblox
-app.get("/poll", (req, res) => {
-    const userId = (req.query.userId || "").trim();
-
-    if (!userId) {
-        return res.status(400).json({ error: "Missing userId query param" });
-    }
-
-    // Registrar que este jugador está online
-    players[userId] = Date.now();
-
-    let scriptsToSend = [];
-
-    // Scripts específicos para este userId
-    if (pending[userId] && pending[userId].length > 0) {
-        scriptsToSend = scriptsToSend.concat(pending[userId]);
-        pending[userId] = [];
-    }
-
-    // Scripts globales ("all")
-    if (pending["all"] && pending["all"].length > 0) {
-        scriptsToSend = scriptsToSend.concat(pending["all"]);
-        pending["all"] = [];
-    }
-
-    if (scriptsToSend.length > 0) {
-        console.log(`[POLL] Delivered ${scriptsToSend.length} script(s) to ${userId}`);
-    }
-
-    res.json({ scripts: scriptsToSend });
-});
-
-// ── GET /status ── para debug y ver cuántos están conectados
-app.get("/status", (req, res) => {
-    const now = Date.now();
-
-    // Limpiar jugadores inactivos (>15 segundos sin poll)
-    Object.keys(players).forEach(uid => {
-        if (now - players[uid] > 15000) {
-            delete players[uid];
-        }
-    });
-
-    res.json({
-        online_players: Object.keys(players),
-        online_count: Object.keys(players).length,
-        pending: Object.fromEntries(
-            Object.entries(pending).map(([k, v]) => [k, v.length])
-        )
-    });
-});
-
-// Raíz (para verificar que el servidor vive)
-app.get("/", (req, res) => {
-    res.json({ status: "Mercury Bridge online", port: PORT, env: process.env.NODE_ENV || "development" });
-});
-
-// Iniciar servidor
-app.listen(PORT, () => {
-    console.log("========================================");
-    console.log(` Mercury Bridge running on port ${PORT}`);
-    console.log(" URL base: https://test-production-bcc9.up.railway.app");
-    console.log("========================================");
-});
+    
+    document.getElementById('connectBtn').addEventListener('click', connectPhantom);
+    
+    // Inicializar con datos de ejemplo
+    updateDisplay();
+</script>
+</body>
+</html>
